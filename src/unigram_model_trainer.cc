@@ -277,6 +277,9 @@ TrainerModel::SentencePieces Trainer::MakeSeedSentencePiecesInternal() {
       const auto w = string_util::UnicodeTextToUTF8(uw);
       queue.push(w, score);
 
+      if ( DEBUG_VOC )
+	LOG(INFO) << "AAA " << w << " " << R[i] << " " << L[i] << " " << D[i];
+      
       const auto subpieces =
           SplitIntoWords(w, trainer_spec_.treat_whitespace_as_suffix(),
                          trainer_spec_.allow_whitespace_only_pieces());
@@ -296,11 +299,25 @@ TrainerModel::SentencePieces Trainer::MakeSeedSentencePiecesInternal() {
     seed_sentencepieces.emplace_back(p);
   }
 
+  float sum = 0.0;
+  for (const auto& e : seed_sentencepieces){  // access by const reference
+    if ( DEBUG_VOC )
+      LOG(INFO) << "XXX " << e.first << ' ' << e.second;
+    sum += e.second;
+  }
+  if ( DEBUG_VOC )
+    LOG(INFO) << "SUM = " << sum; 
+
   ToLogProb(seed_sentencepieces.begin(), seed_sentencepieces.end());
 
   LOG(INFO) << "Initialized " << seed_sentencepieces.size()
-            << " seed sentencepieces";
+            << " seed sentencepieces. They are: ";
 
+  if ( DEBUG_VOC ){
+    for (const auto& e : seed_sentencepieces) // access by const reference
+      LOG(INFO) << "YYY " << e.first << ' ' << e.second;
+  }
+  
   return seed_sentencepieces;
 }
 
@@ -381,8 +398,12 @@ TrainerModel::SentencePieces Trainer::RunMStep(
   // This modification will act as a sparse prior.
   const float logsum = Digamma(sum);
   for (auto &w : new_sentencepieces) {
+    if ( DEBUG_VOC )
+      LOG(INFO) << "BBB " << w.first << " " << w.second;
     w.second = Digamma(w.second) - logsum;
   }
+  if ( DEBUG_VOC )
+    LOG(INFO) << "BBB SUM " << sum;
 
   return new_sentencepieces;
 }
@@ -597,8 +618,54 @@ util::Status Trainer::Train() {
   RETURN_IF_ERROR(model.status());
   RETURN_IF_ERROR(LoadSentences());
 
-  auto seed_sentencepieces = MakeSeedSentencePieces();
-  model.SetSentencePieces(std::move(seed_sentencepieces));
+  // #####################
+  //  int DEBUG_VOC = false;
+
+  bool USE_SENTENCEPIECE_FROM_FILE = true;
+  int N_ITER = 0;
+  
+  if ( USE_SENTENCEPIECE_FROM_FILE ){
+
+    const auto filename = "/mnt/c/Users/martinflechl/scratch/sentencepiece/build_test/sentencepiece/test/input.vocab";
+    std::unique_ptr<filesystem::ReadableFile> fp_ = filesystem::NewReadableFile(filename);
+    std::string line;
+    bool is_ok = true;
+
+    TrainerModel::SentencePieces my_sentencepieces;
+  
+    int ctr = 1;
+    while ( is_ok ){
+      is_ok = fp_->ReadLine(&line);
+      LOG(INFO) << "Line number and line are: ";
+      LOG(INFO) << "---" << ctr << "---" << is_ok << "---";
+      LOG(INFO) << "---" << line << "---";
+      ctr++;
+
+      if ( is_ok ){
+	int end_of_word = line.find('\t');
+	const std::string word = line.substr(0, end_of_word);
+	const float prob = std::stof( line.substr(end_of_word+1, line.length()) );
+
+	LOG(INFO) << "---" << word << "---" << prob << "---";
+
+	if ( word == "<unk>" or word == "<s>" or word == "</s>" ){
+	  LOG(INFO) << "Skipping special word" ;
+	  continue;
+	}
+	
+	my_sentencepieces.emplace_back(word, prob);
+      }
+    
+    }
+    model.SetSentencePieces(std::move(my_sentencepieces));
+
+  }
+  // #####################
+  else{
+    auto seed_sentencepieces = MakeSeedSentencePieces();
+    model.SetSentencePieces(std::move(seed_sentencepieces));
+  }
+    //  model.SetSentencePieces(std::move(my_sentencepieces));
 
   if (trainer_spec_.split_by_whitespace()) {
     SplitSentencesByWhitespace();
@@ -608,28 +675,51 @@ util::Status Trainer::Train() {
 
   desired_vocab_size_ = static_cast<size_t>(trainer_spec_.vocab_size() * 1.1);
 
+  int extra_iter = 0;
   while (true) {
     // Sub-EM iteration.
+    if ( USE_SENTENCEPIECE_FROM_FILE and N_ITER == 0 )
+      break;
+
     for (int iter = 0; iter < trainer_spec_.num_sub_iterations(); ++iter) {
       // Executes E step
       float objective = 0.0;
       int64 num_tokens = 0;
       const auto expected = RunEStep(model, &objective, &num_tokens);
 
+      LOG(INFO) << " before, current wordpiece size: " << model.GetPieceSize();
+
       // Executes M step.
       auto new_sentencepieces = RunMStep(model, expected);
+      //    model.SetSentencePieces(std::move(new_sentencepieces));
+
+      int ctr = 1;
+      for (const auto& e : new_sentencepieces){  // access by const reference
+	//	if ( DEBUG_VOC )
+	LOG(INFO) << "CCC " << ctr << " " << e.first << ' ' << e.second;
+	ctr++;
+	  //	sum += e.second;
+      }
+
       model.SetSentencePieces(std::move(new_sentencepieces));
 
+      
       LOG(INFO) << "EM sub_iter=" << iter << " size=" << model.GetPieceSize()
                 << " obj=" << objective << " num_tokens=" << num_tokens
                 << " num_tokens/piece="
-                << 1.0 * num_tokens / model.GetPieceSize();
+                << 1.0 * num_tokens / model.GetPieceSize()
+	        << " current wordpiece size: " << model.GetPieceSize()
+	        << " desired_vocab_size_ " << desired_vocab_size_ ;
     }  // end of Sub EM iteration
 
     // Stops the iteration when the size of sentences reaches to the
     // desired symbol size.
     if (model.GetPieceSize() <= desired_vocab_size_) {
-      break;
+      if ( extra_iter >= N_ITER ) break;
+      else{
+	extra_iter++;
+	continue;
+      }
     }
 
     // Prunes pieces.
@@ -639,6 +729,9 @@ util::Status Trainer::Train() {
 
   // Finally, adjusts the size of sentencepices to be |vocab_size|.
   final_pieces_ = FinalizeSentencePieces(model);
+
+  //      LOG(INFO) << "BBB " << w.first << " " << w.second;
+
 
   return Save();
 }

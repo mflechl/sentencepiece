@@ -71,7 +71,8 @@ class Trainer : public TrainerInterface {
   TrainerModel::SentencePieces MakeSeedSentencePieces();
 
   util::Status Train() override;
-
+  int DEBUG_VOC = false;
+  
  private:
   FRIEND_TEST(TrainerTest, IsValidSentencePieceTest);
 
