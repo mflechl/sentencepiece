@@ -1,0 +1,6 @@
+<blank>
+<bos>
+<eos>
+\new-paragraph
+\new-line
+\backslash

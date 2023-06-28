@@ -1,0 +1,11 @@
+<blank>
+<bos>
+<eos>
+<spkDOCTOR>
+<spkOTHER>
+.\guessed
+,\guessed
+?\guessed
+\new-paragraph
+\new-line
+\backslash
