@@ -1,6 +1,6 @@
 # SentencePiece
 
-Forked from Google's [[sentencepiece](https://github.com/google/sentencepiece)] repository
+Forked from Google's [sentencepiece](https://github.com/google/sentencepiece) repository
 
 Modified version to allow input seed vocabularies for unigram LM-based subword models
 
