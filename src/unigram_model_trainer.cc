@@ -626,7 +626,7 @@ util::Status Trainer::Train() {
   
   if ( USE_SENTENCEPIECE_FROM_FILE ){
 
-    const auto filename = "/mnt/c/Users/martinflechl/scratch/sentencepiece/build_test/sentencepiece/test/input.vocab";
+    const auto filename = "input.vocab";
     std::unique_ptr<filesystem::ReadableFile> fp_ = filesystem::NewReadableFile(filename);
     std::string line;
     bool is_ok = true;
